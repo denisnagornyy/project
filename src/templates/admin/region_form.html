@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>{{ title }}</h1>
+<form method="post">
+    {{ form.hidden_tag() }}
+    <div class="mb-3">
+        {{ form.name.label(class="form-label") }}
+        {{ form.name(class="form-control", autofocus=True) }}
+        {% for error in form.name.errors %}
+            <div class="text-danger">{{ error }}</div>
+        {% endfor %}
+    </div>
+    <button type="submit" class="btn btn-success">{{ form.submit.label.text }}</button>
+    <a href="{{ url_for('main.admin_regions_list') }}" class="btn btn-secondary">Назад</a>
+</form>
+{% endblock %}
