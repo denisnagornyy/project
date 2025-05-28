@@ -20,36 +20,21 @@
 Вспомогательные методы используются для отдельных шагов, таких как парсинг XML,
 извлечение текста из элементов, получение или создание записей в БД и управление сессиями.
 """
+import os
+import glob
+import logging  
 
-# Импорт стандартных модулей Python:
-import os  # Для работы с операционной системой, например, для построения путей к файлам (os.path.join).
-import glob  # Для поиска файлов по шаблону (например, glob.glob('*.xml') для получения списка всех XML-файлов в директории).
-import logging  # Для ведения логов о ходе выполнения, ошибках и предупреждениях.
-
-# Импорт `contextmanager` из стандартного модуля `contextlib`.
-# `contextmanager` — это декоратор, который позволяет легко создавать менеджеры контекста
-# с использованием генераторов. Менеджеры контекста используются с инструкцией `with`,
-# обеспечивая корректное получение и освобождение ресурсов (например, сессий БД).
 from contextlib import contextmanager
 
-# Импорт `etree` из библиотеки `lxml`.
-# `lxml.etree` — это мощная и быстрая библиотека для работы с XML и HTML.
-# Она используется здесь для парсинга XML-файлов. `iterparse` позволяет
-# эффективно обрабатывать большие XML-файлы, не загружая их целиком в память.
 from lxml import etree
 
-# Импорт моделей SQLAlchemy из локального модуля `src.models`.
-# Эти модели (`Region`, `EducationalOrganization` и т.д.) представляют таблицы
-# в базе данных и используются для создания, чтения, обновления и удаления записей.
 from src.models import Region, EducationalOrganization, SpecialtyGroup, Specialty, EducationalProgram
 
-# Импорт объекта `db` (экземпляр SQLAlchemy) из локального модуля `src.database`.
-# `db` предоставляет доступ к сессии базы данных (`db.session`) и другим
-# утилитам SQLAlchemy, интегрированным с Flask.
 from src.database import db
 
 
 class DataLoader:
+    
     """
     Класс, отвечающий за загрузку, парсинг данных из XML-файлов
     и их последующее сохранение в базу данных приложения.
@@ -61,6 +46,7 @@ class DataLoader:
     """
 
     def __init__(self, cache_path='cache'):
+        
         """
         Конструктор класса DataLoader.
 
@@ -73,10 +59,8 @@ class DataLoader:
                                         Путь может быть относительным или абсолютным.
         """
         self.cache_path = cache_path
-        # Можно добавить инициализацию логгера здесь, если требуется специфичная настройка
-        # logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-
     def _get_text(self, element, tag, default=''):
+        
         """
         Вспомогательный метод для безопасного извлечения текстового содержимого
         из дочернего XML-элемента.
@@ -97,17 +81,15 @@ class DataLoader:
             str: Текстовое содержимое найденного дочернего элемента (очищенное)
                  или значение `default`.
         """
-        # `element.find(tag)` ищет первый дочерний элемент с указанным тегом.
+        
         child = element.find(tag)
-        # Проверяем, что элемент найден (`child is not None`) и что он содержит текст (`child.text` не пустой).
         if child is not None and child.text:
-            # `child.text.strip()` возвращает текст элемента, удаляя пробелы по краям.
             return child.text.strip()
-        # Если условия не выполнены, возвращаем значение по умолчанию.
         return default
 
     @contextmanager
     def session_scope(self, app=None):
+        
         """
         Менеджер контекста для управления сессиями SQLAlchemy.
 
@@ -135,55 +117,20 @@ class DataLoader:
         Yields:
             sqlalchemy.orm.Session: Активная сессия SQLAlchemy.
         """
+        
         if app:
-            # Если передан экземпляр Flask-приложения `app`:
-            # `app.app_context()`: Создает и активирует контекст приложения.
-            # Это необходимо для доступа к `current_app`, конфигурации,
-            # и для корректной работы `db.session` в окружении Flask.
             with app.app_context():
-                # `db.session`: Получаем сессию SQLAlchemy, связанную с Flask-приложением.
-                # Flask-SQLAlchemy управляет областью видимости этой сессии.
                 session = db.session
                 try:
-                    # `yield session`: Предоставляем сессию для использования внутри блока `with`.
-                    # Выполнение кода внутри `with` приостанавливается здесь.
                     yield session
-                    # Если код внутри `with` завершился без исключений,
-                    # фиксируем транзакцию.
                     session.commit()
-                except Exception: # Ловим любые исключения
-                    # Если во время работы с сессией произошло исключение,
-                    # откатываем транзакцию, чтобы изменения не попали в БД.
+                except Exception:
                     session.rollback()
-                    # Повторно вызываем исключение, чтобы оно не было подавлено
-                    # и могло быть обработано выше по стеку вызовов.
                     raise
                 finally:
-                    # Блок `finally` выполняется всегда, независимо от того,
-                    # было ли исключение.
-                    # `session.close()` (или `db.session.remove()` в Flask-SQLAlchemy)
-                    # освобождает ресурсы сессии. Flask-SQLAlchemy обычно сама
-                    # управляет закрытием сессии в конце запроса, но явный вызов
-                    # здесь может быть полезен в некоторых сценариях, особенно
-                    # если сессия используется вне стандартного цикла запрос-ответ.
-                    # Однако, для `db.session` из Flask-SQLAlchemy, `remove()`
-                    # предпочтительнее, чем `close()`, так как он возвращает сессию в пул.
-                    # В данном случае, `close()` может быть избыточным, если `db.session`
-                    # правильно управляется Flask-SQLAlchemy.
-                    # Для простоты оставим `close()`, но стоит иметь в виду нюансы.
-                    # Фактически, Flask-SQLAlchemy обычно сама заботится о `db.session.remove()`
-                    # в конце HTTP-запроса или CLI-команды.
-                    # Если это кастомный скрипт, то `close()` или `remove()` важны.
-                    # В контексте Flask-команды или запроса, это может быть не строго необходимо.
-                    session.close() # Для сессий, управляемых Flask-SQLAlchemy, это может быть не нужно.
+                    session.close()
         else:
-            # Если экземпляр Flask-приложения `app` не передан:
-            # Используем `db.session` напрямую. Это предполагает, что `db` уже
-            # инициализирован и каким-то образом доступен контекст (например,
-            # если этот код выполняется в CLI-команде Flask с `@with_appcontext`).
-            # Этот сценарий менее надежен без явного управления контекстом приложения.
-            session = db.session # Получаем текущую сессию
-            # Логика try/except/finally аналогична предыдущему блоку.
+            session = db.session
             try:
                 yield session
                 session.commit()
@@ -191,11 +138,10 @@ class DataLoader:
                 session.rollback()
                 raise
             finally:
-                # Закрытие сессии здесь также может быть избыточным, если
-                # Flask-SQLAlchemy управляет сессией.
                 session.close()
 
     def _extract_region_from_address(self, address):
+        
         """
         Извлекает или определяет название региона из строки адреса.
 
@@ -216,16 +162,11 @@ class DataLoader:
             str | None: Извлеченное название региона, если удалось его определить,
                         иначе `None`.
         """
-        # TODO: Реализовать логику извлечения региона из адреса.
-        # Например, можно использовать регулярные выражения или список известных регионов.
-        # Пример очень упрощенной логики (не для продакшена):
-        # known_regions = ["Москва", "Санкт-Петербург", "Московская область", ...]
-        # for region_name in known_regions:
-        #     if region_name.lower() in address.lower():
-        #         return region_name
-        return None # Текущая реализация-заглушка
+        
+        return None
 
     def _get_or_create(self, session, model, defaults=None, **kwargs):
+        
         """
         Вспомогательный метод для получения существующего экземпляра модели из БД
         или создания нового, если он не найден.
@@ -269,101 +210,53 @@ class DataLoader:
                    -   `created` (bool): Флаг, равный `True`, если экземпляр был создан,
                                          и `False`, если он был найден в базе данных.
         """
-        # Пытаемся найти существующий экземпляр модели в базе данных.
-        # `session.query(model)` создает запрос к таблице, соответствующей `model`.
-        # `.filter_by(**kwargs)` добавляет условия WHERE к запросу, используя
-        # именованные аргументы `kwargs` (например, если `kwargs` это `{'name': 'Москва'}`,
-        # то условие будет `WHERE name = 'Москва'`).
-        # `.first()` выполняет запрос и возвращает первый найденный результат или `None`,
-        # если ничего не найдено.
         instance = session.query(model).filter_by(**kwargs).first()
         if instance:
-            # Если экземпляр найден, возвращаем его и флаг `False` (не создан).
             return instance, False
         else:
-            # Если экземпляр не найден, создаем новый.
-            # `params` — это словарь аргументов для конструктора модели.
-            # Сначала он копирует `kwargs`.
             params = dict((k, v) for k, v in kwargs.items())
-            # Если предоставлен словарь `defaults`, обновляем `params` его значениями.
-            # `defaults` может содержать значения для полей, которые не используются
-            # для поиска уникальности, но должны быть установлены при создании.
             if defaults:
                 params.update(defaults)
-            # Создаем новый экземпляр модели, передавая `params` как именованные аргументы
-            # конструктору (например, `Region(name='Москва', code='77')`).
             instance = model(**params)
-            # Добавляем новый экземпляр в сессию SQLAlchemy.
-            # Это помечает объект для вставки в базу данных при следующем коммите или flush'е.
             session.add(instance)
-            # `session.flush()` отправляет все ожидающие SQL-команды (в данном случае INSERT)
-            # в базу данных, но НЕ фиксирует транзакцию.
-            # Это полезно, чтобы получить ID нового объекта (если он автоинкрементный)
-            # до полного коммита транзакции, что может быть необходимо для установки
-            # связей с другими объектами.
             session.flush()
-            # Возвращаем созданный экземпляр и флаг `True` (создан).
             return instance, True
 
     def _parse_xml_files(self):
         logging.info(f"Начало парсинга XML-файлов из {self.cache_path}...")
-        # --- Метод _parse_xml_files ---
-        # Этот метод отвечает за поиск и парсинг всех XML-файлов в директории `self.cache_path`.
-        # Он извлекает из каждого файла данные об образовательных организациях,
-        # формирует список словарей с этими данными и возвращает его.
-
-        # Получаем список всех XML-файлов в директории `self.cache_path`.
-        # Используется `glob.glob` с шаблоном '*.xml' для поиска всех файлов с расширением .xml.
         xml_files = glob.glob(os.path.join(self.cache_path, '*.xml'))
 
-        # Если XML-файлы не найдены, выводим предупреждение в лог и возвращаем пустой список.
         if not xml_files:
             logging.warning("XML файлы для парсинга не найдены.")
             return []
 
-        # Список для хранения данных всех организаций из всех файлов.
         all_organizations_data = []
 
-        # Проходим по каждому найденному XML-файлу.
         for xml_file_path in xml_files:
             logging.info(f"Парсинг файла: {xml_file_path}")
-            # Список для хранения данных организаций из текущего файла.
             organizations_in_file = []
 
             try:
-                # Определяем основной тег, который будем искать в XML.
-                # В данном случае это 'Certificate', который, предположительно,
-                # содержит информацию о сертификате и связанную с ним организацию.
                 certificate_tag = 'Certificate'
                 logging.info(f"Используется основной тег: '{certificate_tag}'")
 
-                # Используем `lxml.etree.iterparse` для итеративного парсинга XML.
-                # Это позволяет обрабатывать большие файлы без загрузки их целиком в память.
-                # Параметры:
-                # - `events=('end',)`: обрабатывать событие "конец элемента".
-                # - `tag=certificate_tag`: обрабатывать только элементы с тегом 'Certificate'.
-                # - `recover=True`: пытаться восстанавливаться после ошибок в XML.
                 context = etree.iterparse(xml_file_path, events=('end',), tag=certificate_tag, recover=True)
 
-                # Проходим по каждому элементу 'Certificate' по мере их завершения.
                 for event, cert_elem in context:
                     # Ищем внутри 'Certificate' элемент 'ActualEducationOrganization',
                     # который содержит данные об образовательной организации.
                     org_elem = cert_elem.find('ActualEducationOrganization')
 
-                    # Если элемент 'ActualEducationOrganization' отсутствует,
-                    # выводим предупреждение и пропускаем этот сертификат.
                     if org_elem is None:
                         logging.warning(f"Пропущен сертификат без данных об организации (<ActualEducationOrganization>) в {xml_file_path}")
-                        # Очищаем элемент из памяти, чтобы не накапливать объекты.
+  
                         cert_elem.clear()
-                        # Удаляем предыдущие элементы из родительского узла для освобождения памяти.
+                        
                         while cert_elem.getprevious() is not None:
                             del cert_elem.getparent()[0]
                         continue
 
                     # Извлекаем данные об организации из дочерних элементов XML.
-                    # Используем вспомогательный метод `_get_text` для безопасного получения текста.
                     org_data = {
                         'full_name': self._get_text(org_elem, 'FullName'),
                         'short_name': self._get_text(org_elem, 'ShortName'),
@@ -389,28 +282,20 @@ class DataLoader:
                         'federal_district_short_name': self._get_text(org_elem, 'FederalDistrictShortName'),
                         'federal_district_name': self._get_text(org_elem, 'FederalDistrictName'),
                     }
-
-                    # Если у организации отсутствует ОГРН (уникальный идентификатор),
-                    # выводим предупреждение и пропускаем эту запись.
                     if not org_data['ogrn']:
                         logging.warning(f"Пропущена организация без ОГРН в {xml_file_path}. Сертификат ID: {self._get_text(cert_elem, 'Id')}.")
-                        # Очищаем элемент из памяти.
                         cert_elem.clear()
-                        # Удаляем предыдущие элементы из родительского узла.
                         while cert_elem.getprevious() is not None:
                             del cert_elem.getparent()[0]
                         continue
 
-                    # Добавляем словарь с данными организации в список для текущего файла.
                     organizations_in_file.append(org_data)
 
-                    # Очищаем элемент сертификата из памяти, чтобы не накапливать объекты.
                     cert_elem.clear()
-                    # Удаляем предыдущие элементы из родительского узла.
+                    
                     while cert_elem.getprevious() is not None:
                         del cert_elem.getparent()[0]
 
-                # Удаляем объект итератора парсинга, чтобы освободить ресурсы.
                 del context
 
             # Обработка ошибок парсинга XML.
@@ -421,14 +306,10 @@ class DataLoader:
                 logging.error(f"Непредвиденная ошибка при парсинге файла {xml_file_path}: {e}")
                 continue
 
-            # Логируем количество организаций, найденных в текущем файле.
             logging.info(f"В файле {xml_file_path} найдено {len(organizations_in_file)} организаций.")
-            # Добавляем данные из текущего файла в общий список.
             all_organizations_data.extend(organizations_in_file)
 
-        # Логируем общее количество организаций, найденных во всех файлах.
         logging.info(f"Парсинг XML-файлов завершен. Всего найдено {len(all_organizations_data)} организаций.")
-        # Возвращаем список словарей с данными организаций.
         return all_organizations_data
 
     def _populate_db(self, organizations_data, app=None):
@@ -532,6 +413,4 @@ class DataLoader:
             logging.info("Заполнение базы данных завершено.")
 
     def run_update(self, app=None):
-        # This method can be used to trigger the full update process
-        # For example, download, parse, and populate DB
         pass
